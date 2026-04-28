@@ -641,6 +641,12 @@ function SetupScreen({ onDraw, history }) {
             ? <span style={{padding:'4px 12px',borderRadius:50,background:'rgba(74,222,128,0.12)',color:'#4ade80',border:'1px solid rgba(74,222,128,0.3)',fontSize:11,fontWeight:700,letterSpacing:1,textTransform:'uppercase'}}>● Admin</span>
             : <span style={{padding:'4px 12px',borderRadius:50,background:'rgba(255,255,255,0.05)',color:'rgba(255,255,255,0.4)',border:'1px solid rgba(255,255,255,0.1)',fontSize:11,fontWeight:600,letterSpacing:1,textTransform:'uppercase'}}>👁 Public</span>}
           <button onClick={()=>setShowHistory(true)} style={{padding:'6px 16px',border:'1px solid rgba(255,255,255,0.1)',borderRadius:10,background:'rgba(255,255,255,0.04)',color:'rgba(255,255,255,0.55)',cursor:'pointer',fontSize:13}}>📋 History ({history.length})</button>
+          {admin && (
+            <button onClick={()=>{ try{localStorage.removeItem('pv_is_admin');}catch(e){} location.reload(); }}
+              style={{padding:'6px 16px',border:'1px solid rgba(239,68,68,0.25)',borderRadius:10,background:'rgba(239,68,68,0.12)',color:'#f87171',cursor:'pointer',fontSize:13,fontWeight:600}}>
+              Logout
+            </button>
+          )}
         </div>
       </div>
 
@@ -703,9 +709,17 @@ function SetupScreen({ onDraw, history }) {
                     <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:28,fontWeight:800,color: subs.length>0?accentColor:'rgba(255,255,255,0.3)'}}>{subs.length}</div>
                     <div style={{fontSize:12,color:'rgba(255,255,255,0.35)'}}>subscribers in pool</div>
                   </div>
-                  <button onClick={()=>setShowSubs(true)} style={{padding:'8px 18px',background:`${accentColor}22`,border:`1px solid ${accentColor}44`,borderRadius:10,color:accentColor,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                    {subs.length===0 ? (admin ? '+ Add Subscribers' : 'View list →') : (admin ? 'Manage →' : 'View list →')}
-                  </button>
+                  {admin ? (
+                    <button onClick={()=>setShowSubs(true)} style={{padding:'8px 18px',background:`${accentColor}22`,border:`1px solid ${accentColor}44`,borderRadius:10,color:accentColor,cursor:'pointer',fontSize:13,fontWeight:600}}>
+                      {subs.length===0 ? '+ Add Subscribers' : 'Manage →'}
+                    </button>
+                  ) : subs.length>0 ? (
+                    <button onClick={()=>setShowSubs(true)} style={{padding:'8px 18px',background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:10,color:'rgba(255,255,255,0.55)',cursor:'pointer',fontSize:13,fontWeight:600}}>
+                      👁 View list
+                    </button>
+                  ) : (
+                    <span style={{padding:'8px 14px',borderRadius:10,fontSize:12,color:'rgba(255,255,255,0.35)',fontStyle:'italic'}}>Admin will add subscribers</span>
+                  )}
                 </div>
                 {subs.length>0 && (
                   <div style={{display:'flex',flexWrap:'wrap',gap:5}}>

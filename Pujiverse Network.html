@@ -94,10 +94,20 @@
         try { const s = localStorage.getItem('pv_social'); return s ? JSON.parse(s) : SOCIAL_LINKS; }
         catch { return SOCIAL_LINKS; }
       });
+      const [localWebsites, setLocalWebsites] = useState(() => {
+        try { const s = localStorage.getItem('pv_websites'); return s ? JSON.parse(s) : []; }
+        catch { return []; }
+      });
+      const [localPosts, setLocalPosts] = useState(() => {
+        try { const s = localStorage.getItem('pv_posts'); return s ? JSON.parse(s) : []; }
+        catch { return []; }
+      });
 
       // Persist channels
       useEffect(() => { localStorage.setItem('pv_channels', JSON.stringify(localChannels)); }, [localChannels]);
       useEffect(() => { localStorage.setItem('pv_social', JSON.stringify(localSocial)); }, [localSocial]);
+      useEffect(() => { localStorage.setItem('pv_websites', JSON.stringify(localWebsites)); }, [localWebsites]);
+      useEffect(() => { localStorage.setItem('pv_posts', JSON.stringify(localPosts)); }, [localPosts]);
 
       // ---- Connect Supabase ----
       const connectSupabase = useCallback(() => {
@@ -150,6 +160,8 @@
               onAdminClick={() => setView('login')}
               videos={localVideos}
               social={localSocial}
+              websites={localWebsites}
+              posts={localPosts}
             />
           )}
 
@@ -168,6 +180,10 @@
               setLocalVideos={setLocalVideos}
               localSocial={localSocial}
               setLocalSocial={setLocalSocial}
+              localWebsites={localWebsites}
+              setLocalWebsites={setLocalWebsites}
+              localPosts={localPosts}
+              setLocalPosts={setLocalPosts}
             />
           )}
         </>

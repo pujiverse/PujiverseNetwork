@@ -86,6 +86,8 @@ function loadHistory() {
   try { return JSON.parse(localStorage.getItem('pv_lot_history') || '[]'); } catch { return []; }
 }
 function saveHistory(arr) { localStorage.setItem('pv_lot_history', JSON.stringify(arr)); }
+// Admin flag — set by AdminPanel after successful login. Without it, subscriber editing UI is hidden.
+function isAdmin() { return localStorage.getItem('pv_is_admin') === '1'; }
 
 const CAT_COLORS_L = {
   "Science & Technology":"#22d3ee","Entertainment":"#c084fc","Education":"#818cf8",
@@ -163,6 +165,7 @@ function Stars() {
 
 // ── Subscriber Manager Modal ───────────────────────────────────────────────
 function SubsManager({ channel, subs, setSubs, onClose }) {
+  const admin = isAdmin();
   const [tab, setTab] = useState('list'); // list | paste | csv | manual
   const [pasteText, setPasteText] = useState('');
   const [manForm, setManForm] = useState({ name:'', handle:'', email:'', subscriberId:'', phone:'' });
@@ -239,10 +242,15 @@ function SubsManager({ channel, subs, setSubs, onClose }) {
             </div>
           </div>
           <div style={{display:'flex',gap:4,borderBottom:'1px solid rgba(255,255,255,0.08)',paddingBottom:0}}>
-            {[['list','📋 List'],['paste','📝 Paste'],['csv','📁 CSV'],['manual','✏️ Manual']].map(([t,l])=>(
+            {(admin ? [['list','📋 List'],['paste','📝 Paste'],['csv','📁 CSV'],['manual','✏️ Manual']] : [['list','📋 List']]).map(([t,l])=>(
               <button key={t} onClick={()=>setTab(t)} style={tabStyle(t)}>{l}</button>
             ))}
-            {subs.length>0 && <button onClick={clearAll} style={{marginLeft:'auto',padding:'7px 14px',borderRadius:8,border:'none',cursor:'pointer',fontSize:12,background:'rgba(239,68,68,0.12)',color:'#f87171'}}>Clear All</button>}
+            {!admin && (
+              <span style={{marginLeft:'auto',padding:'6px 12px',borderRadius:8,fontSize:11,fontWeight:600,background:'rgba(192,132,252,0.12)',color:'#c084fc',border:'1px solid rgba(192,132,252,0.25)',display:'flex',alignItems:'center',gap:6}}>
+                👁 Read-only — admin only can edit
+              </span>
+            )}
+            {admin && subs.length>0 && <button onClick={clearAll} style={{marginLeft:'auto',padding:'7px 14px',borderRadius:8,border:'none',cursor:'pointer',fontSize:12,background:'rgba(239,68,68,0.12)',color:'#f87171'}}>Clear All</button>}
           </div>
         </div>
 
@@ -252,7 +260,7 @@ function SubsManager({ channel, subs, setSubs, onClose }) {
             subs.length===0
               ? <div style={{textAlign:'center',padding:'48px 0',color:'rgba(255,255,255,0.3)'}}>
                   <div style={{fontSize:36,marginBottom:12}}>👥</div>
-                  <div>No subscribers yet — use Paste, CSV or Manual to add them</div>
+                  <div>{admin ? 'No subscribers yet — use Paste, CSV or Manual to add them' : 'No subscribers yet for this channel — admin will add them.'}</div>
                 </div>
               : <div style={{display:'flex',flexDirection:'column',gap:6}}>
                   {subs.map((s,i)=>(
@@ -267,7 +275,7 @@ function SubsManager({ channel, subs, setSubs, onClose }) {
                           {s.subscriberId && <span>ID: {s.subscriberId}</span>}
                         </div>
                       </div>
-                      <button onClick={()=>delSub(s.id)} style={{padding:'4px 10px',borderRadius:7,border:'none',background:'rgba(239,68,68,0.15)',color:'#f87171',cursor:'pointer',fontSize:12}}>×</button>
+                      {admin && <button onClick={()=>delSub(s.id)} style={{padding:'4px 10px',borderRadius:7,border:'none',background:'rgba(239,68,68,0.15)',color:'#f87171',cursor:'pointer',fontSize:12}}>×</button>}
                     </div>
                   ))}
                 </div>
@@ -604,6 +612,7 @@ function ResultsScreen({ channel, winners, drawDate, onReset }) {
 
 // ── SETUP SCREEN ───────────────────────────────────────────────────────────
 function SetupScreen({ onDraw, history }) {
+  const admin = isAdmin();
   const [selCh, setSelCh]         = useState(CHANNELS[0]);
   const [winnerCount, setWinnerCount] = useState(1);
   const [subs, setSubs]           = useState(() => loadSubs(CHANNELS[0].sno));
@@ -627,7 +636,10 @@ function SetupScreen({ onDraw, history }) {
           <span style={{color:'rgba(255,255,255,0.4)'}}>PUJIVERSE</span>&nbsp;
           <span style={{background:'linear-gradient(135deg,#22d3ee,#c084fc)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',backgroundClip:'text'}}>LOTTERY</span>
         </div>
-        <div style={{marginLeft:'auto',display:'flex',gap:10}}>
+        <div style={{marginLeft:'auto',display:'flex',gap:10,alignItems:'center'}}>
+          {admin
+            ? <span style={{padding:'4px 12px',borderRadius:50,background:'rgba(74,222,128,0.12)',color:'#4ade80',border:'1px solid rgba(74,222,128,0.3)',fontSize:11,fontWeight:700,letterSpacing:1,textTransform:'uppercase'}}>● Admin</span>
+            : <span style={{padding:'4px 12px',borderRadius:50,background:'rgba(255,255,255,0.05)',color:'rgba(255,255,255,0.4)',border:'1px solid rgba(255,255,255,0.1)',fontSize:11,fontWeight:600,letterSpacing:1,textTransform:'uppercase'}}>👁 Public</span>}
           <button onClick={()=>setShowHistory(true)} style={{padding:'6px 16px',border:'1px solid rgba(255,255,255,0.1)',borderRadius:10,background:'rgba(255,255,255,0.04)',color:'rgba(255,255,255,0.55)',cursor:'pointer',fontSize:13}}>📋 History ({history.length})</button>
         </div>
       </div>
@@ -692,7 +704,7 @@ function SetupScreen({ onDraw, history }) {
                     <div style={{fontSize:12,color:'rgba(255,255,255,0.35)'}}>subscribers in pool</div>
                   </div>
                   <button onClick={()=>setShowSubs(true)} style={{padding:'8px 18px',background:`${accentColor}22`,border:`1px solid ${accentColor}44`,borderRadius:10,color:accentColor,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                    {subs.length===0?'+ Add Subscribers':'Manage →'}
+                    {subs.length===0 ? (admin ? '+ Add Subscribers' : 'View list →') : (admin ? 'Manage →' : 'View list →')}
                   </button>
                 </div>
                 {subs.length>0 && (

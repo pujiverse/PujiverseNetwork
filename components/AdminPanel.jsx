@@ -365,14 +365,129 @@ function SocialTab({ localSocial, setLocalSocial }) {
 }
 
 // ---- SUPABASE CONFIG TAB ----
-function ConfigTab({ supabaseUrl, supabaseKey, setSupabaseUrl, setSupabaseKey, onConnect }) {
+function ConfigTab({ supabaseUrl, supabaseKey, setSupabaseUrl, setSupabaseKey, onConnect, supabase, localChannels, localVideos, localSocial, localWebsites, localPosts }) {
   const [msg, setMsg] = React.useState('');
+  const [syncing, setSyncing] = React.useState(false);
+  const [syncLog, setSyncLog] = React.useState([]);
 
   const save = () => {
     localStorage.setItem('pv_sb_url', supabaseUrl);
     localStorage.setItem('pv_sb_key', supabaseKey);
     onConnect();
     setMsg('Supabase config saved & connected!'); setTimeout(()=>setMsg(''),3000);
+  };
+
+  const log = (line, ok=true) => setSyncLog(prev => [...prev, { line, ok, t: new Date().toLocaleTimeString() }]);
+
+  const syncAll = async () => {
+    if (!supabase) { log('❌ Not connected to Supabase. Click "Connect Supabase" above first.', false); return; }
+    setSyncing(true); setSyncLog([]);
+
+    // 1. CHANNELS — upsert by sno
+    try {
+      const rows = localChannels.map(ch => ({
+        sno: ch.sno, channel_name: ch.name, handle: ch.handle, category: ch.cat,
+        youtube_url: ch.url, viral_score: parseInt(ch.score)||0, cpm_tier: ch.cpm,
+        team_size: parseInt(ch.team)||1, status: ch.status
+      }));
+      const { error } = await supabase.from('channels').upsert(rows, { onConflict: 'sno' });
+      if (error) throw error;
+      log(`✓ channels: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ channels: ${e.message || e}`, false); }
+
+    // 2. SOCIAL LINKS — clear + reinsert (simplest)
+    try {
+      const rows = localSocial.map((s,i) => ({
+        platform: s.platform, handle: s.handle, url: s.url,
+        icon_key: s.icon, brand_color: s.color, display_order: i, is_active: true
+      }));
+      await supabase.from('social_links').delete().neq('platform','__none__');
+      const { error } = await supabase.from('social_links').insert(rows);
+      if (error) throw error;
+      log(`✓ social_links: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ social_links: ${e.message || e}`, false); }
+
+    // 3. VIDEOS
+    try {
+      const rows = [];
+      Object.entries(localVideos).forEach(([sno, plMap]) => {
+        Object.entries(plMap || {}).forEach(([plIdx, vids]) => {
+          (vids || []).forEach((v, i) => rows.push({
+            channel_sno: sno, playlist_index: parseInt(plIdx),
+            playlist_name: localChannels.find(c=>c.sno===sno)?.playlists?.[parseInt(plIdx)] || '',
+            title: v.title, video_url: v.url, sort_order: i
+          }));
+        });
+      });
+      if (rows.length > 0) {
+        await supabase.from('videos').delete().neq('id','00000000-0000-0000-0000-000000000000');
+        const { error } = await supabase.from('videos').insert(rows);
+        if (error) throw error;
+      }
+      log(`✓ videos: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ videos: ${e.message || e}`, false); }
+
+    // 4. WEBSITES
+    try {
+      const rows = (localWebsites || []).map(w => ({
+        id: w.id, title: w.title, url: w.url, description: w.description || '',
+        tags: w.tags || [], accent: w.accent || '#22d3ee'
+      }));
+      const { error } = await supabase.from('websites').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
+      log(`✓ websites: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ websites: ${e.message || e} — make sure you ran the new SQL below`, false); }
+
+    // 5. POSTS
+    try {
+      const rows = (localPosts || []).map(p => ({
+        id: p.id, title: p.title, url: p.url, platform: p.platform,
+        cover: p.cover || '', summary: p.summary || '',
+        post_date: p.date && /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : null
+      }));
+      const { error } = await supabase.from('posts').upsert(rows, { onConflict: 'id' });
+      if (error) throw error;
+      log(`✓ posts: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ posts: ${e.message || e} — make sure you ran the new SQL below`, false); }
+
+    // 6. LOTTERY SUBSCRIBERS — across all channels
+    try {
+      const rows = [];
+      localChannels.forEach(ch => {
+        try {
+          const subs = JSON.parse(localStorage.getItem('pv_lot_subs_' + ch.sno) || '[]');
+          subs.forEach(s => rows.push({
+            sub_id: s.id, channel_sno: ch.sno,
+            name: s.name || '', handle: s.handle || '', email: s.email || '',
+            subscriber_id: s.subscriberId || '', phone: s.phone || ''
+          }));
+        } catch(e) {}
+      });
+      if (rows.length > 0) {
+        await supabase.from('lottery_subscribers').delete().neq('sub_id','__none__');
+        const { error } = await supabase.from('lottery_subscribers').insert(rows);
+        if (error) throw error;
+      }
+      log(`✓ lottery_subscribers: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ lottery_subscribers: ${e.message || e} — make sure you ran the new SQL below`, false); }
+
+    // 7. LOTTERY HISTORY
+    try {
+      const hist = JSON.parse(localStorage.getItem('pv_lot_history') || '[]');
+      const rows = hist.map(h => ({
+        history_id: h.id, channel_name: h.channel, channel_sno: h.channelSno,
+        draw_date: h.date, pool_size: h.poolSize, winner_count: h.winnerCount,
+        winners: h.winners
+      }));
+      if (rows.length > 0) {
+        const { error } = await supabase.from('lottery_history').upsert(rows, { onConflict: 'history_id' });
+        if (error) throw error;
+      }
+      log(`✓ lottery_history: ${rows.length} rows synced`);
+    } catch(e) { log(`✗ lottery_history: ${e.message || e} — make sure you ran the new SQL below`, false); }
+
+    log('— Done —');
+    setSyncing(false);
   };
 
   return (
@@ -394,9 +509,34 @@ function ConfigTab({ supabaseUrl, supabaseKey, setSupabaseUrl, setSupabaseKey, o
         <AInput label="Supabase Project URL" value={supabaseUrl} onChange={setSupabaseUrl} placeholder="https://xxxx.supabase.co" />
         <AInput label="Supabase Anon Key" value={supabaseKey} onChange={setSupabaseKey} placeholder="eyJhbGciOiJIUzI1NiIsInR5c..." />
       </div>
-      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:32 }}>
+      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:24, flexWrap:'wrap' }}>
         <ABtn onClick={save} variant="primary">Connect Supabase</ABtn>
         {msg && <span style={{ fontSize:13, color:'#4ade80' }}>{msg}</span>}
+      </div>
+
+      {/* SYNC PANEL */}
+      <div style={{ background:'rgba(74,222,128,0.06)', border:'1px solid rgba(74,222,128,0.25)', borderRadius:14, padding:20, marginBottom:32 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:14, flexWrap:'wrap', marginBottom:14 }}>
+          <div>
+            <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:16, fontWeight:800, color:'#4ade80', margin:'0 0 4px' }}>📤 Sync All Data to Supabase</div>
+            <p style={{ color:'rgba(255,255,255,0.55)', fontSize:13, margin:0, maxWidth:520 }}>
+              Push everything currently in your browser (channels, videos, social links, lottery subs, websites, posts, draw history) to your Supabase tables in one go. Use this anytime your local data is ahead of Supabase. Existing rows are upserted by primary key — no duplicates.
+            </p>
+          </div>
+          <ABtn onClick={syncAll} variant="primary" style={{ background: syncing ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg,#4ade80,#22d3ee)' }}>
+            {syncing ? 'Syncing…' : '↑ Sync Now'}
+          </ABtn>
+        </div>
+        {syncLog.length > 0 && (
+          <div style={{ background:'rgba(0,0,0,0.4)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:10, padding:'10px 14px', fontFamily:'ui-monospace,Menlo,Consolas,monospace', fontSize:12, lineHeight:1.7, maxHeight:240, overflow:'auto' }}>
+            {syncLog.map((l, i) => (
+              <div key={i} style={{ color: l.ok ? 'rgba(255,255,255,0.7)' : '#fca5a5' }}>
+                <span style={{ color:'rgba(255,255,255,0.3)', marginRight:8 }}>{l.t}</span>{l.line}
+              </div>
+            ))}
+          </div>
+        )}
+        {!supabase && <div style={{ marginTop:10, fontSize:12, color:'#fca5a5' }}>⚠ Not connected yet. Click "Connect Supabase" above first.</div>}
       </div>
 
       <h4 style={{ fontFamily:"'Space Grotesk',sans-serif", color:'#c084fc', margin:'0 0 12px' }}>SQL Setup — Run in Supabase SQL Editor</h4>
@@ -453,17 +593,101 @@ CREATE TABLE IF NOT EXISTS social_links (
   is_active boolean DEFAULT true
 );
 
--- 5. Enable RLS (optional but recommended)
+-- 5. WEBSITES TABLE (My Projects on home page)
+CREATE TABLE IF NOT EXISTS websites (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  url text NOT NULL,
+  description text,
+  tags text[],
+  accent text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 6. POSTS TABLE (Medium / Blogger / Patreon links)
+CREATE TABLE IF NOT EXISTS posts (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  url text NOT NULL,
+  platform text,
+  cover text,
+  summary text,
+  post_date date,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 7. LOTTERY SUBSCRIBERS TABLE
+CREATE TABLE IF NOT EXISTS lottery_subscribers (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  sub_id text,
+  channel_sno text,
+  name text NOT NULL,
+  handle text,
+  email text,
+  subscriber_id text,
+  phone text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 8. LOTTERY HISTORY TABLE (past draws)
+CREATE TABLE IF NOT EXISTS lottery_history (
+  history_id text PRIMARY KEY,
+  channel_name text,
+  channel_sno text,
+  draw_date text,
+  pool_size integer,
+  winner_count integer,
+  winners jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
+-- 9. Enable RLS + public read for all tables
 ALTER TABLE channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE websites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lottery_subscribers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lottery_history ENABLE ROW LEVEL SECURITY;
 
--- Allow public read
+-- Public read policies
+DROP POLICY IF EXISTS "Public read channels" ON channels;
 CREATE POLICY "Public read channels" ON channels FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read playlists" ON playlists;
 CREATE POLICY "Public read playlists" ON playlists FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read videos" ON videos;
 CREATE POLICY "Public read videos" ON videos FOR SELECT USING (true);
-CREATE POLICY "Public read social" ON social_links FOR SELECT USING (true);`}</pre>
+DROP POLICY IF EXISTS "Public read social" ON social_links;
+CREATE POLICY "Public read social" ON social_links FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read websites" ON websites;
+CREATE POLICY "Public read websites" ON websites FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read posts" ON posts;
+CREATE POLICY "Public read posts" ON posts FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read lottery_subs" ON lottery_subscribers;
+CREATE POLICY "Public read lottery_subs" ON lottery_subscribers FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public read lottery_history" ON lottery_history;
+CREATE POLICY "Public read lottery_history" ON lottery_history FOR SELECT USING (true);
+
+-- IMPORTANT: write policies (anon key writes from the admin panel)
+-- These allow the anon key to insert/update/delete. If you want to lock down writes
+-- to authenticated users only, replace USING(true) with USING(auth.role() = 'authenticated').
+DROP POLICY IF EXISTS "Anon write channels" ON channels;
+CREATE POLICY "Anon write channels" ON channels FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write playlists" ON playlists;
+CREATE POLICY "Anon write playlists" ON playlists FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write videos" ON videos;
+CREATE POLICY "Anon write videos" ON videos FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write social" ON social_links;
+CREATE POLICY "Anon write social" ON social_links FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write websites" ON websites;
+CREATE POLICY "Anon write websites" ON websites FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write posts" ON posts;
+CREATE POLICY "Anon write posts" ON posts FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write lottery_subs" ON lottery_subscribers;
+CREATE POLICY "Anon write lottery_subs" ON lottery_subscribers FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Anon write lottery_history" ON lottery_history;
+CREATE POLICY "Anon write lottery_history" ON lottery_history FOR ALL USING (true) WITH CHECK (true);`}</pre>
     </div>
   );
 }
@@ -896,7 +1120,7 @@ function AdminPanel({ onBack, supabase, supabaseUrl, supabaseKey, setSupabaseUrl
         {tab === 'websites'    && <WebsitesTab localWebsites={localWebsites} setLocalWebsites={setLocalWebsites} />}
         {tab === 'posts'       && <PostsTab localPosts={localPosts} setLocalPosts={setLocalPosts} />}
         {tab === 'social'      && <SocialTab localSocial={localSocial} setLocalSocial={setLocalSocial} />}
-        {tab === 'config'      && <ConfigTab supabaseUrl={supabaseUrl} supabaseKey={supabaseKey} setSupabaseUrl={setSupabaseUrl} setSupabaseKey={setSupabaseKey} onConnect={onConnectSupabase} />}
+        {tab === 'config'      && <ConfigTab supabaseUrl={supabaseUrl} supabaseKey={supabaseKey} setSupabaseUrl={setSupabaseUrl} setSupabaseKey={setSupabaseKey} onConnect={onConnectSupabase} supabase={supabase} localChannels={localChannels} localVideos={localVideos} localSocial={localSocial} localWebsites={localWebsites} localPosts={localPosts} />}
       </div>
     </div>
   );
